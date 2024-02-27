@@ -21,7 +21,7 @@ class Client:
 
     
     def get_local_rep(self, dataset, s, e):
-        x = torch.from_numpy(dataset.data_x[:, s:e]).to(torch.float).unsqueeze(0) # 1, T, M
+        x = torch.from_numpy(dataset.data_x[:, s:e]).to(torch.float).unsqueeze(0).to(self.device) # 1, T, M
         if self.args.lcrep:
             self.model.eval()
             return self.model.embed(x)
