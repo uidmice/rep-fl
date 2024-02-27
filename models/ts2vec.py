@@ -17,10 +17,10 @@ class TS2Vec:
     ):
         if args.distributed and args.lcrep:
             self.rep = True
-            self.attn = MultiheadAttention(input_dims, hidden_dims, args.n_heads)
+            self.attn = MultiheadAttention(input_dims, hidden_dims, args.n_heads).to(device)
         else:
             self.rep = False
-            self.attn = nn.Linear(input_dims, hidden_dims)
+            self.attn = nn.Linear(input_dims, hidden_dims).to(device)
         self.input_dim = input_dims
         self._net = TSEncoder(input_dims=hidden_dims, output_dims=output_dims, hidden_dims=hidden_dims, depth=depth).to(device)
         self.net = torch.optim.swa_utils.AveragedModel(self._net)
