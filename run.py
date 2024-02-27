@@ -97,19 +97,21 @@ if not args.glrep:
 else:
     Exp = Exp_Forecast  
     
-dist = 'dist' if args.distributed else 'no_dist'
+dist = 'dist' if args.distributed else 'central'
+
 
 if args.is_training:
     for ii in range(args.itr):
         # setting record of experiments
-        setting = '{}_{}_{}_sl{}_ll{}_pl{}_el{}_{}_{}'.format(
+        setting = '{}_{}_{}_sl{}_ll{}_pl{}_el{}_gl{}_lr{}_{}'.format(
             args.exp_id,
             args.model,
             args.data,
             args.seq_len,
             args.label_len,
             args.pred_len,
-            args.e_layers, dist, ii)
+            args.e_layers, args.glrep, 
+            args.lcrep, dist)
 
         exp = Exp(args)  # set experiments
         print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
@@ -120,14 +122,15 @@ if args.is_training:
         torch.cuda.empty_cache()
 else:
     ii = 0
-    setting = '{}_{}_{}_sl{}_ll{}_pl{}_el{}_{}_{}'.format(
+    setting = '{}_{}_{}_sl{}_ll{}_pl{}_el{}_gl{}_lr{}_{}'.format(
             args.exp_id,
             args.model,
             args.data,
             args.seq_len,
             args.label_len,
             args.pred_len,
-            args.e_layers, dist, ii)
+            args.e_layers, args.glrep, 
+            args.lcrep, dist)
 
     exp = Exp(args)  # set experiments
     print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
