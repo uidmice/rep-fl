@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 class MultiheadAttention(nn.Module):
 
-    def __init__(self, input_dim, embed_dim, num_heads):
+    def __init__(self, input_dim, embed_dim, num_heads, device):
         super().__init__()
         assert embed_dim % num_heads == 0, "Embedding dimension must be 0 modulo number of heads."
 
@@ -15,8 +15,8 @@ class MultiheadAttention(nn.Module):
 
         # Stack all weight matrices 1...h together for efficiency
         # Note that in many implementations you see "bias=False" which is optional
-        self.qkv_proj = nn.Linear(input_dim, 3*embed_dim)
-        self.o_proj = nn.Linear(embed_dim, embed_dim)
+        self.qkv_proj = nn.Linear(input_dim, 3*embed_dim).to(device)
+        self.o_proj = nn.Linear(embed_dim, embed_dim).to(device)
 
         self._reset_parameters()
 
