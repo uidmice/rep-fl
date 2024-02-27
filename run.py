@@ -4,7 +4,7 @@ import torch
 
 
 from exp.exp_forecasting_d import Exp_Forecast_D
-from exp.exp_forecasting import Exp_Forecast
+# from exp.exp_forecasting import Exp_Forecast
 import random
 import numpy as np
 
