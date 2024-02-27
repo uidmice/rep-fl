@@ -45,7 +45,7 @@ class TS2Vec:
             loss_log: a list containing the training losses on each epoch.
         '''
             # assert train_data.ndim == 3
-        train_data = train_data.numpy()   
+        train_data = train_data.detach().numpy()   
         if self.rep:
             train_data = np.reshape(train_data, (train_data.shape[0], train_data.shape[1], -1))   
         if n_iters is None and n_epochs is None:

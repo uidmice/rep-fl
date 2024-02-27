@@ -98,7 +98,7 @@ class Exp_Forecast:
         train_steps = len(train_loader)
 
         local_rep = torch.cat([c.get_local_rep(train_data, self.partition[c.id], self.partition[c.id+1]) for c in self.clients], 
-                                  dim=0).to(self.device)
+                                  dim=0).cpu()
         if self.args.distributed and not self.args.lcrep:
             local_rep = local_rep.permute(2, 1, 0)
         
