@@ -8,7 +8,7 @@ from einops import rearrange
 
 
 class Model(nn.Module):
-    def __init__(self, input_dim, output_dim, emb_dim, pred_len, seq_len, tcn_layers, dropout, device):
+    def __init__(self, input_dim, output_dim, emb_dim, pred_len, seq_len, tcn_layers, dropout):
         super(Model, self).__init__()
         self.pred_len = pred_len
         self.seq_len = seq_len
@@ -23,7 +23,6 @@ class Model(nn.Module):
         self.out_layer = weight_norm(nn.Linear(self.seq_len, self.pred_len))
         self.decoder = weight_norm(nn.Linear(self.emsize, output_dim))
 
-        self.tcn.to(device=device)
 
     def embed(self, x_enc):
         means = x_enc.mean((1,2), keepdim=True).detach()
