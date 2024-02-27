@@ -1,0 +1,8 @@
+dataset/*
+.DS_Store
+```
+__init__*
+runs/*
+checkpoints/*
+*__pycache__*
+```
