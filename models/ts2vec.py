@@ -3,29 +3,32 @@ import torch.nn.functional as F
 from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
 from models.losses import hierarchical_contrastive_loss
-from utils import take_per_row, split_with_nan, centerize_vary_length_series, torch_pad_nan
+from utils.utils import take_per_row, split_with_nan, centerize_vary_length_series, torch_pad_nan
 import torch.nn as nn
-
+from models.multihead_att import MultiheadAttention
+from einops import rearrange
 class TS2Vec:    
     def __init__(
         self,
         input_dims,
         output_dims,
         hidden_dims,
-        depth, device
+        depth, device, args
     ):
-        ''' Initialize a TS2Vec model.
-        
-        Args:
-            input_dims (int): The input dimension. For a univariate time series, this should be set to 1.
-            output_dims (int): The representation dimension.
-            hidden_dims (int): The hidden dimension of the encoder.
-            depth (int): The number of hidden residual blocks in the encoder.
-        '''
-
-        self._net = TSEncoder(input_dims=input_dims, output_dims=output_dims, hidden_dims=hidden_dims, depth=depth).to(device)
+        if args.distributed and args.lcrep:
+            self.rep = True
+            self.attn = MultiheadAttention(input_dims, hidden_dims, args.n_heads)
+        else:
+            self.rep = False
+            self.attn = nn.Linear(input_dims, hidden_dims)
+        self.input_dim = input_dims
+        self._net = TSEncoder(input_dims=hidden_dims, output_dims=output_dims, hidden_dims=hidden_dims, depth=depth).to(device)
         self.net = torch.optim.swa_utils.AveragedModel(self._net)
         self.net.update_parameters(self._net)
+        self.max_train_length = 1000
+        self.batch_size = args.batch_size
+        self.lr = args.learning_rate
+        self.device = device
         self.n_epochs = 0
         self.n_iters = 0
     
@@ -33,7 +36,7 @@ class TS2Vec:
         ''' Training the TS2Vec model.
         
         Args:
-            train_data (numpy.ndarray): The training data. It should have a shape of (n_instance, n_timestamps, n_features). All missing data should be set to NaN.
+            train_data tensor: (n_instance, n_timestamps, n_features). 
             n_epochs (Union[int, NoneType]): The number of epochs. When this reaches, the training stops.
             n_iters (Union[int, NoneType]): The number of iterations. When this reaches, the training stops. If both n_epochs and n_iters are not specified, a default setting would be used that sets n_iters to 200 for a dataset with size <= 100000, 600 otherwise.
             verbose (bool): Whether to print the training loss after each epoch.
@@ -41,8 +44,10 @@ class TS2Vec:
         Returns:
             loss_log: a list containing the training losses on each epoch.
         '''
-        assert train_data.ndim == 3
-        
+            # assert train_data.ndim == 3
+        train_data = train_data.numpy()   
+        if self.rep:
+            train_data = np.reshape(train_data, (train_data.shape[0], train_data.shape[1], -1))   
         if n_iters is None and n_epochs is None:
             n_iters = 200 if train_data.size <= 100000 else 600  # default param for n_iters
         
@@ -56,6 +61,8 @@ class TS2Vec:
             train_data = centerize_vary_length_series(train_data)
                 
         train_data = train_data[~np.isnan(train_data).all(axis=2).all(axis=1)]
+        if self.rep:
+            train_data = np.reshape(train_data, (train_data.shape[0], train_data.shape[1], -1, self.input_dim))   
         
         train_dataset = TensorDataset(torch.from_numpy(train_data).to(torch.float))
         train_loader = DataLoader(train_dataset, batch_size=min(self.batch_size, len(train_dataset)), shuffle=True, drop_last=True)
@@ -84,7 +91,7 @@ class TS2Vec:
                 x = x.to(self.device)
                 
                 ts_l = x.size(1)
-                crop_l = np.random.randint(low=2 ** (self.temporal_unit + 1), high=ts_l+1)
+                crop_l = np.random.randint(low=2, high=ts_l+1)
                 crop_left = np.random.randint(ts_l - crop_l + 1)
                 crop_right = crop_left + crop_l
                 crop_eleft = np.random.randint(crop_left + 1)
@@ -92,6 +99,13 @@ class TS2Vec:
                 crop_offset = np.random.randint(low=-crop_eleft, high=ts_l - crop_eright + 1, size=x.size(0))
                 
                 optimizer.zero_grad()
+
+                if self.rep:
+                    x = x.reshape(-1, x.size(2), x.size(3))
+                    x = self.attn(x)
+                    x = rearrange(x, '(b t) n m -> (b n) t m', t=self.max_train_length)
+                else:
+                    x = self.attn(x)
                 
                 out1 = self._net(take_per_row(x, crop_offset + crop_eleft, crop_right - crop_eleft))
                 out1 = out1[:, -crop_l:]
@@ -101,8 +115,7 @@ class TS2Vec:
                 
                 loss = hierarchical_contrastive_loss(
                     out1,
-                    out2,
-                    temporal_unit=self.temporal_unit
+                    out2
                 )
                 
                 loss.backward()

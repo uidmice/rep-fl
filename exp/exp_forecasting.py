@@ -45,7 +45,7 @@ class Exp_Forecast:
             self.num_clients = 1
             self.m_output = dataset_setting_dict[args.data]['out_dim']
             self.partition = dataset_setting_dict[args.data]['in_partition']
-        
+        self.lc_emb = args.emb_dim if args.lcrep else self.partition[-1] - self.partition[0]
         self.device = self._acquire_device()
         self.clients = self._build_model()
     
@@ -71,7 +71,8 @@ class Exp_Forecast:
             if self.args.use_multi_gpu and self.args.use_gpu:
                 model = nn.DataParallel(model, device_ids=self.args.device_ids)
             clients.append(Client(model, i, self.device, self.args))
-        self.fm = ts2vec.TS2Vec(self.args.emb_dim, self.args.seq_len, self.args.pred_len, self.args.e_layers, self.args.dropout, self.args.use_gpu).to(self.device)
+        self.fm = ts2vec.TS2Vec(self.lc_emb, self.args.glrep_dim, self.args.att_out, 
+                                self.args.g_layers, self.device, self.args)
         return clients
     
 
@@ -96,6 +97,16 @@ class Exp_Forecast:
 
         train_steps = len(train_loader)
 
+        local_rep = torch.cat([c.get_local_rep(train_data, self.partition[c.id], self.partition[c.id+1]) for c in self.clients], 
+                                  dim=0).to(self.device)
+        if self.args.distributed and not self.args.lcrep:
+            local_rep = local_rep.permute(2, 1, 0)
+        
+        if self.num_clients > 1:
+            local_rep = local_rep.permute(1, 0, 2).unsqueeze(0)
+
+        print(local_rep.size())
+        self.fm.fit(local_rep)
         records = []
         records_vali = []
 

@@ -16,10 +16,17 @@ class Client:
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optim, T_max=10, eta_min=1e-8)
         self.early_stopping = EarlyStopping(patience=args.patience, verbose=True)
         self.stop = False
-
         self.args = args
-
         self.device = device
+
+    
+    def get_local_rep(self, dataset, s, e):
+        x = torch.from_numpy(dataset.data_x[:, s:e]).to(torch.float).unsqueeze(0) # 1, T, M
+        if self.args.lcrep:
+            self.model.eval()
+            return self.model.embed(x)
+        return x
+
 
 
     def step(self, x, y):

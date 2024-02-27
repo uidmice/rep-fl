@@ -25,14 +25,16 @@ class Model(nn.Module):
 
 
     def embed(self, x_enc):
-        means = x_enc.mean((1,2), keepdim=True).detach()
-        enc_out = x_enc - means
-        stdev = torch.sqrt(
-            torch.var(enc_out, dim=(1,2), keepdim=True, unbiased=False) + 1e-5)
-        enc_out /= stdev
-        enc_out = self.in_layer(enc_out)    #B L E   
-        enc_out = self.tcn(enc_out)     
-        return enc_out
+        # means = x_enc.mean((1,2), keepdim=True).detach()
+        # enc_out = x_enc - means
+        # stdev = torch.sqrt(
+        #     torch.var(enc_out, dim=(1,2), keepdim=True, unbiased=False) + 1e-5)
+        # enc_out /= stdev
+        with torch.no_grad():
+            enc_out = self.in_layer(x_enc)    #B L E   
+            enc_out = rearrange(enc_out, 'b l m -> b m l')
+            enc_out = self.tcn(enc_out) ##B E L
+        return rearrange(enc_out, 'b m l -> b l m')
 
     def forward(self, x_enc,  mask=None):
         B, L, M = x_enc.shape   # L = seq_len

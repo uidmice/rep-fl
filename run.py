@@ -4,7 +4,7 @@ import torch
 
 
 from exp.exp_forecasting_d import Exp_Forecast_D
-# from exp.exp_forecasting import Exp_Forecast
+from exp.exp_forecasting import Exp_Forecast
 import random
 import numpy as np
 
@@ -13,7 +13,7 @@ random.seed(fix_seed)
 torch.manual_seed(fix_seed)
 np.random.seed(fix_seed)
 
-parser = argparse.ArgumentParser(description='TimesNet')
+parser = argparse.ArgumentParser(description='Rep-FL')
 
 # basic config
 
@@ -24,6 +24,8 @@ parser.add_argument('--model', type=str, default='TCN',
 parser.add_argument('--fm', type=str, default='TS2Vec',
                     help='model name, options: [TS2Vec]')
 parser.add_argument('--distributed', type=int, help='distributed setting', default=0)
+parser.add_argument('--glrep', action='store_true', help='use global fm', default=False)
+parser.add_argument('--lcrep', action='store_true', help='use local representation learning', default=False)
 
 # data loader
 parser.add_argument('--data', type=str, default='weather', help='dataset type')
@@ -37,20 +39,20 @@ parser.add_argument('--pred_len', type=int, default=48, help='prediction sequenc
 
 # model define
 parser.add_argument('--emb_dim', type=int, default=32, help='decoder input size')
-parser.add_argument('--e_layers', type=int, default=3, help='num of encoder layers')
-#gpt
-parser.add_argument('--c_out', type=int, default=7, help='output size')
-parser.add_argument('--d_model', type=int, default=768, help='dimension of model')
+parser.add_argument('--e_layers', type=int, default=3, help='num of tcn layers')
+#fm
+parser.add_argument('--att_out', type=int, default=64, help='attention output dim')
+parser.add_argument('--glrep_dim', type=int, default=256, help='dimension of model')
 parser.add_argument('--n_heads', type=int, default=4, help='num of heads')
-parser.add_argument('--d_layers', type=int, default=1, help='num of decoder layers')
-parser.add_argument('--d_ff', type=int, default=768, help='dimension of fcn')
-parser.add_argument('--moving_avg', type=int, default=25, help='window size of moving average')
-parser.add_argument('--distil', action='store_false',
-                    help='whether to use distilling in encoder, using this argument means not using distilling',
-                    default=True)
+parser.add_argument('--g_layers', type=int, default=1, help='num of encoder layers')
+# parser.add_argument('--c_out', type=int, default=7, help='output size')
+# parser.add_argument('--d_model', type=int, default=768, help='dimension of model')
+# parser.add_argument('--n_heads', type=int, default=4, help='num of heads')
+# parser.add_argument('--d_layers', type=int, default=1, help='num of decoder layers')
+# parser.add_argument('--d_ff', type=int, default=768, help='dimension of fcn')
+# parser.add_argument('--moving_avg', type=int, default=25, help='window size of moving average')
+
 parser.add_argument('--dropout', type=float, default=0.3, help='dropout')
-parser.add_argument('--activation', type=str, default='gelu', help='activation')
-parser.add_argument('--output_attention', action='store_true', help='whether to output attention in ecoder')
 
 # optimization
 parser.add_argument('--num_workers', type=int, default=0, help='data loader num workers') ########
@@ -61,26 +63,20 @@ parser.add_argument('--patience', type=int, default=3, help='early stopping pati
 parser.add_argument('--learning_rate', type=float, default=0.0001, help='optimizer learning rate')
 parser.add_argument('--des', type=str, default='test', help='exp description')
 parser.add_argument('--loss', type=str, default='MSE', help='loss function')
-parser.add_argument('--lradj', type=str, default='type1', help='adjust learning rate')
-parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
-parser.add_argument('--cos', type=int, default=1, help='cos scheduler')
+
 # GPU
 parser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')
 parser.add_argument('--gpu', type=int, default=0, help='gpu')
 parser.add_argument('--use_multi_gpu', action='store_true', help='use multiple gpus', default=False)
 parser.add_argument('--devices', type=str, default='0,1,2,3', help='device ids of multile gpus')
 
-# de-stationary projector params
-parser.add_argument('--p_hidden_dims', type=int, nargs='+', default=[128, 128],
-                    help='hidden layer dimensions of projector (List)')
-parser.add_argument('--p_hidden_layers', type=int, default=2, help='number of hidden layers in projector')
 
-# patching
-parser.add_argument('--patch_size', type=int, default=16)
-parser.add_argument('--stride', type=int, default=16)
-parser.add_argument('--gpt_layers', type=int, default=6)
-parser.add_argument('--ln', type=int, default=0)
-parser.add_argument('--mlp', type=int, default=0)
+# # patching
+# parser.add_argument('--patch_size', type=int, default=16)
+# parser.add_argument('--stride', type=int, default=16)
+# parser.add_argument('--gpt_layers', type=int, default=6)
+# parser.add_argument('--ln', type=int, default=0)
+# parser.add_argument('--mlp', type=int, default=0)
 
 
 args = parser.parse_args()
@@ -96,8 +92,10 @@ print('Args in experiment:')
 print(args)
 
 
-Exp = Exp_Forecast_D
-
+if not args.glrep:
+    Exp = Exp_Forecast_D
+else:
+    Exp = Exp_Forecast  
     
 dist = 'dist' if args.distributed else 'no_dist'
 
