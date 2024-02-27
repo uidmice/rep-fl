@@ -45,6 +45,8 @@ class Model(nn.Module):
             torch.var(enc_out, dim=(1,2), keepdim=True, unbiased=False) + 1e-5)
         enc_out /= stdev
 
+        enc_out = x_enc
+
         enc_out = self.in_layer(enc_out)    #B L E
 
         enc_out = rearrange(enc_out, 'b l m -> b m l')
@@ -53,8 +55,8 @@ class Model(nn.Module):
         outputs = rearrange(outputs, '(b m) l -> b l m', b=B)
         outputs = self.decoder(outputs) #B L M
 
-        outputs = outputs * stdev
-        outputs = outputs + means
+        # outputs = outputs * stdev
+        # outputs = outputs + means
         
         return outputs
 
