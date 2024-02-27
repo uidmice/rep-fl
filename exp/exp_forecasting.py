@@ -106,7 +106,7 @@ class Exp_Forecast:
             local_rep = local_rep.permute(1, 0, 2).unsqueeze(0)
 
         print(local_rep.size())
-        self.fm.fit(local_rep)
+        self.fm.fit(local_rep, verbose=True)
         records = []
         records_vali = []
 
