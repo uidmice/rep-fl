@@ -20,9 +20,17 @@ class Client:
         self.device = device
 
     
-    def get_local_rep(self, dataset, s, e):
-        x = torch.from_numpy(dataset.data_x[:, s:e]).to(torch.float).unsqueeze(0).to(self.device) # 1, T, M
-        if self.args.lcrep:
+    def get_local_rep(self, dataset, s, e, lcrep=False):
+        # if self.args.glrep and self.args.lcrep:
+        #     x =np.concatenate([dataset.data_x[:, s:e], dataset.data_x[:, -self.args.glrep_dim:]], axis=1)
+        #     x = torch.from_numpy(x).to(torch.float).unsqueeze(0).to(self.device) 
+        # else:
+        #     x = torch.from_numpy(dataset.data_x[:, s:e]).to(torch.float).unsqueeze(0).to(self.device) # 1, T, M
+        # if self.args.lcrep:
+        #     self.model.eval()
+        #     return self.model.embed(x)
+        x = torch.from_numpy(dataset.data_x[:, s:e]).to(torch.float).unsqueeze(0).to(self.device)
+        if lcrep:
             self.model.eval()
             return self.model.embed(x)
         return x
@@ -42,12 +50,15 @@ class Client:
         self.optim.step()
         return outputs, loss.item()
     
-    def validate(self, data_loader, path, s, e):
+    def validate(self, data_loader, path, s, e, gl=0):
         self.model.eval()
         total_loss = []
         with torch.no_grad():
             for batch_x, batch_y in data_loader:
-                x = batch_x[:, :, s:e].float().to(self.device)
+                if self.args.glrep:
+                    x = torch.cat([batch_x[:, :, s:e], batch_x[:, :, -gl:]], dim=-1).float().to(self.device)
+                else:
+                    x = batch_x[:, :, s:e].float().to(self.device)
                 y = batch_y[:,-self.args.pred_len:, -1].float().unsqueeze(-1).to(self.device)
                 outputs = self.model(x)
                 loss = self.criterion(outputs, y)

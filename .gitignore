@@ -6,3 +6,6 @@ runs/*
 checkpoints/*
 *__pycache__*
 ```
+
+.vscode/*
+```

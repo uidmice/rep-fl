@@ -3,7 +3,7 @@ import os
 import torch
 
 
-from exp.exp_forecasting_d import Exp_Forecast_D
+from exp.exp_rep import Exp_Rep
 from exp.exp_forecasting import Exp_Forecast
 import random
 import numpy as np
@@ -18,7 +18,7 @@ parser = argparse.ArgumentParser(description='Rep-FL')
 # basic config
 
 parser.add_argument('--is_training', type=int, default=1, help='status')
-parser.add_argument('--exp_id', type=str, default='weather', help='model id')
+parser.add_argument('--exp_id', type=str, default='weather2', help='model id')
 parser.add_argument('--model', type=str, default='TCN',
                     help='model name, options: [TCN]')
 parser.add_argument('--fm', type=str, default='TS2Vec',
@@ -26,6 +26,8 @@ parser.add_argument('--fm', type=str, default='TS2Vec',
 parser.add_argument('--distributed', type=int, help='distributed setting', default=0)
 parser.add_argument('--glrep', action='store_true', help='use global fm', default=False)
 parser.add_argument('--lcrep', action='store_true', help='use local representation learning', default=False)
+parser.add_argument('--glrep_dim', type=int, default=256, help='dimension of global representation')
+parser.add_argument('--fl', action='store_true', default=False, help='aggregate model')
 
 # data loader
 parser.add_argument('--data', type=str, default='weather', help='dataset type')
@@ -42,7 +44,6 @@ parser.add_argument('--emb_dim', type=int, default=32, help='decoder input size'
 parser.add_argument('--e_layers', type=int, default=3, help='num of tcn layers')
 #fm
 parser.add_argument('--att_out', type=int, default=64, help='attention output dim')
-parser.add_argument('--glrep_dim', type=int, default=256, help='dimension of model')
 parser.add_argument('--n_heads', type=int, default=4, help='num of heads')
 parser.add_argument('--g_layers', type=int, default=1, help='num of encoder layers')
 # parser.add_argument('--c_out', type=int, default=7, help='output size')
@@ -91,11 +92,11 @@ if args.use_gpu and args.use_multi_gpu:
 print('Args in experiment:')
 print(args)
 
-
-if not args.glrep:
-    Exp = Exp_Forecast_D
+if args.glrep and args.lcrep:
+    Exp = Exp_Rep
 else:
     Exp = Exp_Forecast  
+
     
 dist = 'dist' if args.distributed else 'central'
 
@@ -110,8 +111,8 @@ if args.is_training:
             args.seq_len,
             args.label_len,
             args.pred_len,
-            args.e_layers, args.glrep, 
-            args.lcrep, dist)
+            args.e_layers, int(args.glrep), 
+            int(args.lcrep), dist)
 
         exp = Exp(args)  # set experiments
         print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
@@ -129,8 +130,8 @@ else:
             args.seq_len,
             args.label_len,
             args.pred_len,
-            args.e_layers, args.glrep, 
-            args.lcrep, dist)
+            args.e_layers, int(args.glrep), 
+            int(args.lcrep), dist)
 
     exp = Exp(args)  # set experiments
     print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))

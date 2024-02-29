@@ -11,12 +11,7 @@ dp_dict = {
     'weather': 'weather/weather.csv'
 }
 
-dl_dict = {
-    'ETTm1': None,
-    'weather': [ 'Tdew (degC)', 'T (degC)', 'Tpot (K)', 
-                'VPmax (mbar)', 'rho (g/m**3)', 'VPdef (mbar)','Tlog (degC)']
-}
-def data_provider(args, flag):
+def data_provider(args, flag, gl=0, labels=None):
     Data = data_dict[args.data]
     data_path = dp_dict[args.data]
 
@@ -29,8 +24,9 @@ def data_provider(args, flag):
         root_path="dataset",
         data_path=data_path,
         flag=flag,
+        gl=gl,
         size=[args.seq_len, args.label_len, args.pred_len],
-        labels = dl_dict[args.data]
+        labels = labels
     )
     print(flag, len(data_set))
     data_loader = DataLoader(

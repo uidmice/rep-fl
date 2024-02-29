@@ -32,7 +32,7 @@ dataset_setting_dict = {
 
 
 
-class Exp_Forecast:
+class Exp_Rep:
     def __init__(self, args):
         self.args = args
         self.partition = dataset_setting_dict[args.exp_id]['in_partition']
@@ -43,9 +43,7 @@ class Exp_Forecast:
         if not args.distributed:
             self.num_clients = 1
             self.partition = [self.partition[0], self.partition[-1]]
-
-        if not self.args.glrep:
-            self.args.glrep_dim = 0
+            
         self.device = self._acquire_device()
         self.clients = self._build_model()
     
@@ -71,8 +69,7 @@ class Exp_Forecast:
             if self.args.use_multi_gpu and self.args.use_gpu:
                 model = nn.DataParallel(model, device_ids=self.args.device_ids)
             clients.append(Client(model, i, self.device, self.args))
-        if self.args.glrep:
-            self.fm = ts2vec.TS2Vec(self.partition[-1] - self.partition[0], self.args.glrep_dim, self.args.att_out, 
+        self.fm = ts2vec.TS2Vec((self.partition[-1] - self.partition[0]) * 3, self.args.glrep_dim, self.args.att_out, 
                                 self.args.g_layers, self.device, self.args)
         return clients
     
@@ -89,27 +86,23 @@ class Exp_Forecast:
         return torch.cat([c.get_local_rep(dataset, self.partition[c.id], self.partition[c.id+1], lcrep) for c in self.clients], 
                                 dim=-1)
     
-    def pre_train_fm(self, path):
-        try:
-            self.fm.net.load_state_dict(torch.load(path + '/checkpoint_ts2vec.pth', map_location=torch.device(self.device)))
-        except:
-            train_data, train_loader = data_provider(self.args, flag='train')
-            vali_data, vali_loader = data_provider(self.args, flag='val')
-            train_x = self.get_local_rep(train_data)
-            val_x = self.get_local_rep(vali_data)
-            
-            early_stopping = EarlyStopping(patience=5, verbose=True)
+    def train_fm(self, path, iters):
+        train_data, train_loader = data_provider(self.args, flag='train')
+        vali_data, vali_loader = data_provider(self.args, flag='val')
+        train_x = self.get_local_rep(train_data, True)
+        val_x = self.get_local_rep(vali_data, True)
+        
+        early_stopping = EarlyStopping(patience=5, verbose=True)
 
-            for _ in range(self.args.train_epochs):
-                train_loss = self.fm.fit(train_x, verbose=True)
-                print('train loss:', np.average(train_loss))
-                vali_loss = self.fm.fit(val_x, verbose=True, validate=True)
-                early_stopping(vali_loss[0], self.fm.net, path, 'ts2vec')
+        for _ in range(iters):
+            train_loss = self.fm.fit(train_x, verbose=True)
+            print('train loss:', np.average(train_loss))
+            vali_loss = self.fm.fit(val_x, verbose=True, validate=True)
+            early_stopping(vali_loss[0], self.fm.net, path, 'ts2vec')
 
-                if early_stopping.early_stop:
-                    self.fm.net.load_state_dict(torch.load(path + '/checkpoint_ts2vec.pth'))
-                    break
-
+            if early_stopping.early_stop:
+                self.fm.net.load_state_dict(torch.load(path + '/checkpoint_ts2vec.pth'))
+                break
 
 
     def train(self, setting):
@@ -121,19 +114,18 @@ class Exp_Forecast:
         if not os.path.exists(path):
             os.makedirs(path)
 
-        if self.args.glrep:
-            self.pre_train_fm(path)
 
-        train_data, train_loader = self._get_data(flag='train', glrep=self.args.glrep)
-        vali_data, vali_loader = self._get_data(flag='val', glrep=self.args.glrep)
-
-        train_steps = len(train_loader)
         records = []
         records_vali = []
 
 
         time_now = time.time()  
         for epoch in range(self.args.train_epochs):
+            train_data, train_loader = self._get_data(flag='train', glrep=(epoch>0))
+            vali_data, vali_loader = self._get_data(flag='val', glrep=(epoch>0))
+
+            train_steps = len(train_loader)
+
             iter_count = 0
             train_loss = []
             ep_loss = [[] for _ in range(self.num_clients)]
@@ -172,6 +164,9 @@ class Exp_Forecast:
             print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f}".format(
                 epoch + 1, train_steps, np.sum(train_loss)/len(train_data), vali_loss))
             
+            if epoch % 2 == 0:
+                self.train_fm(path, max(0, 10 - epoch))
+            
             if all([c.stop for c in self.clients]):
                 break
 
@@ -197,7 +192,7 @@ class Exp_Forecast:
         path = os.path.join(self.args.checkpoints, setting)
         self.load_model(path)
 
-        test_data, test_loader = self._get_data(flag='test', glrep=self.args.glrep)
+        test_data, test_loader = self._get_data(flag='test')
 
         preds = []
         trues = []

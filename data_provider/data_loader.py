@@ -9,7 +9,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 class Dataset_ETT_minute(Dataset):
-    def __init__(self, root_path, flag='train', size=None,
+    def __init__(self, root_path, flag='train', size=None, gl=0,
                  data_path='ETTm1.csv',scale=True, labels=None):
         # size [seq_len, label_len, pred_len]
         # info
@@ -30,6 +30,10 @@ class Dataset_ETT_minute(Dataset):
         self.root_path = root_path
         self.data_path = data_path
         self.__read_data__()
+        self.gl = gl
+        if gl:
+            self.data_x = np.concatenate([self.data_x, np.zeros((self.data_x.shape[0], self.gl))], axis=1)
+
 
     def __read_data__(self):
         self.scaler = StandardScaler()
@@ -72,7 +76,7 @@ class Dataset_ETT_minute(Dataset):
 
 
 class Dataset_Custom(Dataset):
-    def __init__(self, root_path, flag='train', size=None,
+    def __init__(self, root_path, flag='train', size=None, gl=0,
                   data_path='ETTh1.csv',scale=True, labels=None):
         # size [seq_len, label_len, pred_len]
         # info
@@ -95,6 +99,10 @@ class Dataset_Custom(Dataset):
         self.data_path = data_path
         self.labels = labels
         self.__read_data__()
+        self.gl = gl
+        if gl:
+            self.data_x = np.concatenate([self.data_x, np.zeros((self.data_x.shape[0], self.gl))], axis=1)
+
 
     def __read_data__(self):
         self.scaler = StandardScaler()
@@ -103,7 +111,7 @@ class Dataset_Custom(Dataset):
         num_train = int(len(df_raw) * 0.7)
         num_test = int(len(df_raw) * 0.2)
         num_vali = len(df_raw) - num_train - num_test
-        border1s = [0, num_train - self.seq_len, len(df_raw) - num_test - self.seq_len]
+        border1s = [0, num_train - self.seq_len, num_train - self.seq_len]
         border2s = [num_train, num_train + num_vali, len(df_raw)]
         border1 = border1s[self.set_type]
         border2 = border2s[self.set_type]

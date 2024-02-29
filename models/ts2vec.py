@@ -6,7 +6,7 @@ from models.losses import hierarchical_contrastive_loss
 from utils.utils import take_per_row, split_with_nan, centerize_vary_length_series, torch_pad_nan
 import torch.nn as nn
 from models.multihead_att import MultiheadAttention
-from einops import rearrange
+
 class TS2Vec:    
     def __init__(
         self,
@@ -15,42 +15,37 @@ class TS2Vec:
         hidden_dims,
         depth, device, args
     ):
-        if args.distributed and args.lcrep:
-            self.rep = True
-            self.attn = MultiheadAttention(input_dims, hidden_dims, args.n_heads, device).to(device)
-        else:
-            self.rep = False
-            self.attn = nn.Linear(input_dims, hidden_dims).to(device)
+        # self.need_att = args.lcrep and args.distributed
+        # if self.need_att:
+        #     self.attn = MultiheadAttention(input_dims, hidden_dims, args.n_heads, device).to(device)
+        #     self.in_layer = nn.Linear(hidden_dims, hidden_dims).to(device)
+        # else:
+        #     self.in_layer = nn.Linear(input_dims, hidden_dims).to(device)
         self.input_dim = input_dims
-        self._net = TSEncoder(input_dims=hidden_dims, output_dims=output_dims, hidden_dims=hidden_dims, depth=depth).to(device)
+        self._net = TSEncoder(input_dims=input_dims, output_dims=output_dims, hidden_dims=hidden_dims, depth=depth).to(device)
         self.net = torch.optim.swa_utils.AveragedModel(self._net)
         self.net.update_parameters(self._net)
         self.max_train_length = 1000
         self.batch_size = args.batch_size
-        self.lr = args.learning_rate
+        self.lr = 0.001
         self.device = device
         self.n_epochs = 0
-        self.n_iters = 0
+
     
-    def fit(self, train_data, n_epochs=None, n_iters=None, verbose=False):
+    def fit(self, train_data, n_epochs=100, max_n_epochs=10000, verbose=False, validate=False):
         ''' Training the TS2Vec model.
         
         Args:
             train_data tensor: (n_instance, n_timestamps, n_features). 
             n_epochs (Union[int, NoneType]): The number of epochs. When this reaches, the training stops.
-            n_iters (Union[int, NoneType]): The number of iterations. When this reaches, the training stops. If both n_epochs and n_iters are not specified, a default setting would be used that sets n_iters to 200 for a dataset with size <= 100000, 600 otherwise.
             verbose (bool): Whether to print the training loss after each epoch.
             
         Returns:
             loss_log: a list containing the training losses on each epoch.
         '''
             # assert train_data.ndim == 3
-        train_data = train_data.detach().numpy()   
-        if self.rep:
-            train_data = np.reshape(train_data, (train_data.shape[0], train_data.shape[1], -1))   
-        if n_iters is None and n_epochs is None:
-            n_iters = 200 if train_data.size <= 100000 else 600  # default param for n_iters
-        
+        train_data = train_data.detach().cpu().numpy()   
+
         if self.max_train_length is not None:
             sections = train_data.shape[1] // self.max_train_length
             if sections >= 2:
@@ -61,8 +56,8 @@ class TS2Vec:
             train_data = centerize_vary_length_series(train_data)
                 
         train_data = train_data[~np.isnan(train_data).all(axis=2).all(axis=1)]
-        if self.rep:
-            train_data = np.reshape(train_data, (train_data.shape[0], train_data.shape[1], -1, self.input_dim))   
+        # if self.rep:
+        #     train_data = np.reshape(train_data, (train_data.shape[0], train_data.shape[1], -1, self.input_dim))   
         
         train_dataset = TensorDataset(torch.from_numpy(train_data).to(torch.float))
         train_loader = DataLoader(train_dataset, batch_size=min(self.batch_size, len(train_dataset)), shuffle=True, drop_last=True)
@@ -70,20 +65,23 @@ class TS2Vec:
         optimizer = torch.optim.AdamW(self._net.parameters(), lr=self.lr)
         
         loss_log = []
+
+        if validate:
+            self.net.eval()
+            self._net.eval()    
+            n_epochs = 1
+        else:
+            self.net.train()
+            self._net.train()
+
+        nep = 0
         
         while True:
-            if n_epochs is not None and self.n_epochs >= n_epochs:
+            if nep >= n_epochs or self.n_epochs >= max_n_epochs:
                 break
             
-            cum_loss = 0
-            n_epoch_iters = 0
-            
-            interrupted = False
+            cum_loss = 0            
             for batch in train_loader:
-                if n_iters is not None and self.n_iters >= n_iters:
-                    interrupted = True
-                    break
-                
                 x = batch[0]
                 if self.max_train_length is not None and x.size(1) > self.max_train_length:
                     window_offset = np.random.randint(x.size(1) - self.max_train_length + 1)
@@ -100,12 +98,12 @@ class TS2Vec:
                 
                 optimizer.zero_grad()
 
-                if self.rep:
-                    x = x.reshape(-1, x.size(2), x.size(3))
-                    x = self.attn(x)
-                    x = rearrange(x, '(b t) n m -> (b n) t m', t=self.max_train_length)
-                else:
-                    x = self.attn(x)
+                # if self.rep:
+                #     x = x.reshape(-1, x.size(2), x.size(3))
+                #     x = self.attn(x)
+                #     x = rearrange(x, '(b t) n m -> (b n) t m', t=self.max_train_length)
+                # else:
+                #     x = self.attn(x)
                 
                 out1 = self._net(take_per_row(x, crop_offset + crop_eleft, crop_right - crop_eleft))
                 out1 = out1[:, -crop_l:]
@@ -117,30 +115,37 @@ class TS2Vec:
                     out1,
                     out2
                 )
-                
-                loss.backward()
-                optimizer.step()
-                self.net.update_parameters(self._net)
+
+                if not validate:
+                    loss.backward()
+                    optimizer.step()
+                    self.net.update_parameters(self._net)
+
                     
-                cum_loss += loss.item()
-                n_epoch_iters += 1
-                
-                self.n_iters += 1
+                cum_loss += loss.item() * x.size(0)                
 
             
-            if interrupted:
-                break
-            
-            cum_loss /= n_epoch_iters
+            cum_loss /= len(train_loader.dataset)
             loss_log.append(cum_loss)
-            if verbose:
-                print(f"Epoch #{self.n_epochs}: loss={cum_loss}")
-            self.n_epochs += 1
+            nep += 1
 
-            
+            if validate:
+                print(f"Validate: loss={cum_loss}")
+            else:
+                self.n_epochs += 1
+
+                if verbose:
+                    print(f"Epoch #{self.n_epochs}: loss={cum_loss}")
+        
         return loss_log
     
     def _eval_with_pooling(self, x, mask=None, slicing=None, encoding_window=None):
+        # if self.rep:
+        #     x = rearrange(x, 'n t m -> t n m')
+        #     x = self.attn(x) # t, n, m
+        #     x = rearrange(x, 't n m -> n t m')
+        # else:
+        #     x = self.attn(x)
         out = self.net(x.to(self.device, non_blocking=True), mask)
         if encoding_window == 'full_series':
             if slicing is not None:
@@ -182,9 +187,9 @@ class TS2Vec:
             if slicing is not None:
                 out = out[:, slicing]
             
-        return out.cpu()
+        return out
     
-    def encode(self, data, mask=None, encoding_window=None, causal=False, sliding_length=None, sliding_padding=0, batch_size=None):
+    def encode(self, data, mask=None, encoding_window=None, causal=True, sliding_length=None, sliding_padding=0, batch_size=None):
         ''' Compute representations using the model.
         
         Args:
@@ -200,15 +205,15 @@ class TS2Vec:
             repr: The representations for data.
         '''
         assert self.net is not None, 'please train or load a net first'
-        assert data.ndim == 3
         if batch_size is None:
             batch_size = self.batch_size
         n_samples, ts_l, _ = data.shape
 
         org_training = self.net.training
         self.net.eval()
+        # self.attn.eval()
         
-        dataset = TensorDataset(torch.from_numpy(data).to(torch.float))
+        dataset = TensorDataset(data)
         loader = DataLoader(dataset, batch_size=batch_size)
         
         with torch.no_grad():
@@ -279,7 +284,7 @@ class TS2Vec:
             output = torch.cat(output, dim=0)
             
         self.net.train(org_training)
-        return output.numpy()
+        return output
     
     def save(self, fn):
         ''' Save the model to a file.
