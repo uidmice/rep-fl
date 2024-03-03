@@ -4,11 +4,13 @@ from torch.utils.data import DataLoader
 data_dict = {
     'ETTm1': Dataset_ETT_minute,
     'weather': Dataset_Custom,
+    'swat': Dataset_Custom,
 }
 
 dp_dict = {
     'ETTm1': 'ETT-small/ETTm1.csv',
-    'weather': 'weather/weather.csv'
+    'weather': 'weather/weather.csv',
+    'swat': 'SWaT/swat2.csv',
 }
 
 def data_provider(args, flag, gl=0, labels=None):
@@ -26,7 +28,8 @@ def data_provider(args, flag, gl=0, labels=None):
         flag=flag,
         gl=gl,
         size=[args.seq_len, args.label_len, args.pred_len],
-        labels = labels
+        labels = labels,
+        ad=args.task=='ad'
     )
     print(flag, len(data_set))
     data_loader = DataLoader(

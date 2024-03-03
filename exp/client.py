@@ -12,7 +12,10 @@ class Client:
         self.id = id
         self.model = model
         self.optim = optim.Adam(model.parameters(), lr=args.learning_rate)
-        self.criterion = nn.MSELoss()
+        if args.task == 'ad':
+            self.criterion = nn.BCEWithLogitsLoss()
+        else:
+            self.criterion = nn.MSELoss()
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optim, T_max=10, eta_min=1e-8)
         self.early_stopping = EarlyStopping(patience=args.patience, verbose=True)
         self.stop = False
@@ -50,7 +53,7 @@ class Client:
         self.optim.step()
         return outputs, loss.item()
     
-    def validate(self, data_loader, path, s, e, gl=0):
+    def validate(self, data_loader, path, s, e, gl=0, lc_tast=False):
         self.model.eval()
         total_loss = []
         with torch.no_grad():
@@ -59,7 +62,10 @@ class Client:
                     x = torch.cat([batch_x[:, :, s:e], batch_x[:, :, -gl:]], dim=-1).float().to(self.device)
                 else:
                     x = batch_x[:, :, s:e].float().to(self.device)
-                y = batch_y[:,-self.args.pred_len:, -1].float().unsqueeze(-1).to(self.device)
+                if lc_tast:
+                    y = batch_y[:,-self.args.pred_len:, s:e].float().to(self.device)
+                else:
+                    y = batch_y[:,-self.args.pred_len:, -1].float().unsqueeze(-1).to(self.device)
                 outputs = self.model(x)
                 loss = self.criterion(outputs, y)
                 total_loss.append(loss.item() * batch_x.size(0))

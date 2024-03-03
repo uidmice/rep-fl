@@ -77,7 +77,7 @@ class Exp_Rep:
     def _get_data(self, flag, glrep=False):
         data_set, data_loader = data_provider(self.args, flag, gl=self.args.glrep_dim, labels=dataset_setting_dict[self.args.exp_id]['labels'])
         if glrep:
-            local_rep = self.get_local_rep(data_set)
+            local_rep = self.get_local_rep(data_set, True)
             gl_encode = self.fm.encode(local_rep).detach().cpu().numpy() 
             data_set.data_x[:, -self.args.glrep_dim:] = gl_encode[0]
         return data_set, data_loader
@@ -120,6 +120,8 @@ class Exp_Rep:
 
 
         time_now = time.time()  
+        next_fm_train = 1
+        last_fm_train = -1
         for epoch in range(self.args.train_epochs):
             train_data, train_loader = self._get_data(flag='train', glrep=(epoch>0))
             vali_data, vali_loader = self._get_data(flag='val', glrep=(epoch>0))
@@ -129,6 +131,7 @@ class Exp_Rep:
             iter_count = 0
             train_loss = []
             ep_loss = [[] for _ in range(self.num_clients)]
+
 
             epoch_time = time.time()
             for i, (batch_x, batch_y) in enumerate(train_loader):
@@ -164,11 +167,13 @@ class Exp_Rep:
             print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f}".format(
                 epoch + 1, train_steps, np.sum(train_loss)/len(train_data), vali_loss))
             
-            if epoch % 2 == 0:
-                self.train_fm(path, max(0, 10 - epoch))
-            
             if all([c.stop for c in self.clients]):
                 break
+
+            if epoch >= last_fm_train + next_fm_train:
+                self.train_fm(path, max(3, 10 - epoch))
+                last_fm_train = epoch
+                next_fm_train *= 2
 
 
         pickle.dump(records, open(path_r + '/train.pkl', 'wb'))

@@ -3,7 +3,7 @@ import os
 import torch
 
 
-from exp.exp_rep import Exp_Rep
+from exp.exp_forecasting_d import Exp_Forecast_d
 from exp.exp_forecasting import Exp_Forecast
 import random
 import numpy as np
@@ -16,9 +16,9 @@ np.random.seed(fix_seed)
 parser = argparse.ArgumentParser(description='Rep-FL')
 
 # basic config
-
+parser.add_argument('--task', type=str, default='prediction', help='task')
 parser.add_argument('--is_training', type=int, default=1, help='status')
-parser.add_argument('--exp_id', type=str, default='weather2', help='model id')
+parser.add_argument('--exp_id', type=str, default='weather3', help='model id')
 parser.add_argument('--model', type=str, default='TCN',
                     help='model name, options: [TCN]')
 parser.add_argument('--fm', type=str, default='TS2Vec',
@@ -27,7 +27,7 @@ parser.add_argument('--distributed', type=int, help='distributed setting', defau
 parser.add_argument('--glrep', action='store_true', help='use global fm', default=False)
 parser.add_argument('--lcrep', action='store_true', help='use local representation learning', default=False)
 parser.add_argument('--glrep_dim', type=int, default=256, help='dimension of global representation')
-parser.add_argument('--fl', action='store_true', default=False, help='aggregate model')
+parser.add_argument('--lct', action='store_true', default=False, help='local task learning')
 
 # data loader
 parser.add_argument('--data', type=str, default='weather', help='dataset type')
@@ -58,7 +58,7 @@ parser.add_argument('--dropout', type=float, default=0.3, help='dropout')
 # optimization
 parser.add_argument('--num_workers', type=int, default=0, help='data loader num workers') ########
 parser.add_argument('--itr', type=int, default=1, help='experiments times')
-parser.add_argument('--train_epochs', type=int, default=30, help='train epochs')
+parser.add_argument('--train_epochs', type=int, default=20, help='train epochs')
 parser.add_argument('--batch_size', type=int, default=64, help='batch size of train input data')
 parser.add_argument('--patience', type=int, default=3, help='early stopping patience')
 parser.add_argument('--learning_rate', type=float, default=0.0001, help='optimizer learning rate')
@@ -92,8 +92,8 @@ if args.use_gpu and args.use_multi_gpu:
 print('Args in experiment:')
 print(args)
 
-if args.glrep and args.lcrep:
-    Exp = Exp_Rep
+if args.lct:
+    Exp = Exp_Forecast_d
 else:
     Exp = Exp_Forecast  
 
@@ -112,7 +112,7 @@ if args.is_training:
             args.label_len,
             args.pred_len,
             args.e_layers, int(args.glrep), 
-            int(args.lcrep), dist)
+            int(args.lct), dist)
 
         exp = Exp(args)  # set experiments
         print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
@@ -131,7 +131,7 @@ else:
             args.label_len,
             args.pred_len,
             args.e_layers, int(args.glrep), 
-            int(args.lcrep), dist)
+            int(args.lct), dist)
 
     exp = Exp(args)  # set experiments
     print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))

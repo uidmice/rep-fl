@@ -7,28 +7,67 @@ import warnings
 import numpy as np
 from models import TCN, ts2vec
 from exp.client import Client
-from einops import rearrange
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from utils.tools import EarlyStopping
 
 warnings.filterwarnings('ignore')
 
 
 dataset_setting_dict = {   
-    'weather': {
-        'in_partition': [0,1,2,3,4,5],
+    'weather1': {
+        'in_partition': [0,1,2,3],
+        'in_glrep': torch.LongTensor([3]),
         'out_dim': 1,
-        'labels': [ 'Tdew (degC)', 'T (degC)', 'Tpot (K)', 
-                'VPmax (mbar)', 'rho (g/m**3)', 'VPdef (mbar)','Tlog (degC)'],
+        'labels': [ 'Tdew (degC)', 
+                   'rh (%)',
+                   'sh (g/kg)', 
+                    'rho (g/m**3)', 
+                   'H2OC (mmol/mol)'],
         'dataset': 'weather'
     },
-    'weather2':{
-        'dataset': 'weather',
-        'in_partition': [0,1,2,3,4,5],
+    'weather2': {
+        'in_partition': [0,1,2,3],
+        'in_glrep': torch.LongTensor([0,1,2]),
         'out_dim': 1,
-        'labels': [ 'PAR (�mol/m�/s)', 'Tpot (K)', 
-                 'VPmax (mbar)', 'rho (g/m**3)', 'VPdef (mbar)','Tlog (degC)']
+        'labels': [ 'Tdew (degC)', 
+                   'rh (%)',
+                   'sh (g/kg)', 
+                    'rho (g/m**3)', 
+                   'H2OC (mmol/mol)'],
+        'dataset': 'weather'
+    },
+    'weather3':{
+        'dataset': 'weather',
+        'in_partition': [0,2,4,5],
+        'in_glrep': torch.LongTensor([5]),
+        'out_dim': 1,
+        'labels': [ 'rh (%)','p (mbar)', 
+                   'Tdew (degC)','Tpot (K)',
+                   'sh (g/kg)', 
+                   'rho (g/m**3)',
+                   'H2OC (mmol/mol)']
+    },
+    'weather4':{
+        'dataset': 'weather',
+        'in_partition': [0,2,4,5],
+        'in_glrep': torch.LongTensor([0,1,2,3,4,5]),
+        'out_dim': 1,
+        'labels': [ 'rh (%)','p (mbar)', 
+                   'Tdew (degC)','Tpot (K)',
+                   'sh (g/kg)', 
+                   'rho (g/m**3)',
+                   'H2OC (mmol/mol)']
+    },
+    'swat': {   
+        'in_partition': [0,3,7],
+        'in_glrep': torch.LongTensor([5,6,7,8]),
+        'out_dim': 1,
+        'labels':['FIT401', 'AIT402','LIT401',
+                  'FIT504', 'FIT503','FIT502', 'FIT501','PIT501','PIT503',
+                  'Normal/Attack'],
+        'dataset':'swat'
     }
-}
+}   
 
 
 
@@ -39,7 +78,12 @@ class Exp_Forecast:
         self.m_output = dataset_setting_dict[args.exp_id]['out_dim']
         self.args.data = dataset_setting_dict[args.exp_id]['dataset']
         self.num_clients = len(self.partition) - 1
-
+        self.in_glm = dataset_setting_dict[args.exp_id]['in_glrep'] 
+        if args.exp_id == 'swat':
+            # self.args.pred_len = 1
+            # self.args.label_len = args.pred_len -
+            self.args.task = 'ad'
+            self.args.batch_size = 256
         if not args.distributed:
             self.num_clients = 1
             self.partition = [self.partition[0], self.partition[-1]]
@@ -72,7 +116,7 @@ class Exp_Forecast:
                 model = nn.DataParallel(model, device_ids=self.args.device_ids)
             clients.append(Client(model, i, self.device, self.args))
         if self.args.glrep:
-            self.fm = ts2vec.TS2Vec(self.partition[-1] - self.partition[0], self.args.glrep_dim, self.args.att_out, 
+            self.fm = ts2vec.TS2Vec(len(self.in_glm), self.args.glrep_dim, self.args.att_out, 
                                 self.args.g_layers, self.device, self.args)
         return clients
     
@@ -86,8 +130,10 @@ class Exp_Forecast:
         return data_set, data_loader
     
     def get_local_rep(self, dataset, lcrep=False):
-        return torch.cat([c.get_local_rep(dataset, self.partition[c.id], self.partition[c.id+1], lcrep) for c in self.clients], 
-                                dim=-1)
+        # return torch.cat([c.get_local_rep(dataset, self.partition[c.id], self.partition[c.id+1], lcrep) for c in self.clients], 
+        #                         dim=-1)
+        return torch.index_select(torch.from_numpy(dataset.data_x), 1, self.in_glm).to(torch.float).unsqueeze(0).to(self.device)
+
     
     def pre_train_fm(self, path):
         try:
@@ -97,7 +143,7 @@ class Exp_Forecast:
             vali_data, vali_loader = data_provider(self.args, flag='val')
             train_x = self.get_local_rep(train_data)
             val_x = self.get_local_rep(vali_data)
-            
+
             early_stopping = EarlyStopping(patience=5, verbose=True)
 
             for _ in range(self.args.train_epochs):
@@ -213,25 +259,40 @@ class Exp_Forecast:
                     if self.args.glrep:
                         x = torch.cat([x, batch_x[:,:,-self.args.glrep_dim:]], dim=-1)
                     outputs = c.test(x)
+                    if self.args.task == 'ad':
+                        outputs = torch.where(outputs > 0, 1, 0)
                     pred.append(outputs)
 
-                pred = torch.mean(torch.stack(pred), dim=0).detach().cpu().numpy()
-                preds.append(pred)
-                trues.append(batch_y)
+                if self.args.task == 'ad':
+                    pred = torch.cat(pred, dim=0).detach().cpu().numpy()
+                    preds.append(pred)
+                    trues.append(np.repeat( batch_y, self.num_clients, axis=0))
+                else:
+                    pred = torch.mean(torch.stack(pred), dim=0).detach().cpu().numpy()
+                    preds.append(pred)
+                    trues.append(batch_y)
             
         preds = np.concatenate(preds, axis=0)
         trues = np.concatenate(trues, axis=0)
         print('test shape:', preds.shape, trues.shape)
-
-        mae, mse, rmse, mape, mspe = metric(preds, trues)
-        # # result save
-        # folder_path = './ett_results/' + self.args.model + '/'
-        # if not os.path.exists(folder_path):
-        #     os.makedirs(folder_path)
-        print('mae:{:.4f}, mse:{:.4f}, rmse:{:.4f}, mape:{:.4f}, mspe:{:.4f}'.format(mae, mse, rmse, mape, mspe))
         f = open(os.path.join(self.args.store, f"result_{self.args.exp_id}.txt"), 'a')
         f.write(setting + "  \n")
-        f.write('mae:{:.4f}, mse:{:.4f}, rmse:{:.4f}, mape:{:.4f}, mspe:{:.4f}'.format(mae, mse, rmse, mape, mspe))
+        if self.args.task == 'ad':
+            preds = preds[:,0,0]
+            trues = trues[:,0,0]
+            accuracy = np.mean(preds==trues)
+            precision, recall, f_score, support = precision_recall_fscore_support(trues, preds, average='binary')
+            print("Accuracy : {:0.4f}, Precision : {:0.4f}, Recall : {:0.4f}, F-score : {:0.4f} ".format(
+                accuracy, precision,
+                recall, f_score))
+            f.write("Accuracy : {:0.4f}, Precision : {:0.4f}, Recall : {:0.4f}, F-score : {:0.4f} ".format(
+            accuracy, precision,
+            recall, f_score))
+        else:
+            mae, mse, rmse, mape, mspe = metric(preds, trues)
+            print('mae:{:.4f}, mse:{:.4f}, rmse:{:.4f}, mape:{:.4f}, mspe:{:.4f}'.format(mae, mse, rmse, mape, mspe))
+            
+            f.write('mae:{:.4f}, mse:{:.4f}, rmse:{:.4f}, mape:{:.4f}, mspe:{:.4f}'.format(mae, mse, rmse, mape, mspe))
         f.write('\n')
         f.write('\n')
         f.close()
